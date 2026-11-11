@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+
+  <!-- Background: dark rounded square (#0f172a) -->
+  <rect width="512" height="512" rx="80" ry="80" fill="#0f172a"/>
+
+  <!-- Hexagon outline — pointy-top, circumradius 208, center (256,256)
+       Vertices at -90°, -30°, 30°, 90°, 150°, 210° -->
+  <polygon
+    points="256,48 438,152 438,360 256,464 74,360 74,152"
+    fill="none"
+    stroke="#0ea5e9"
+    stroke-width="8"
+    stroke-linejoin="round"
+    opacity="0.30"/>
+
+  <!-- Event-trace waveform — glow simulation (widest → narrowest, transparent → opaque)
+       Center spike at (256,130) represents a detected threat event -->
+  <polyline
+    points="62,256 148,256 174,194 194,318 218,256 244,256 256,130 268,256 294,256 318,192 338,320 362,256 450,256"
+    fill="none" stroke="#38bdf8" stroke-width="34"
+    stroke-linecap="round" stroke-linejoin="round" opacity="0.06"/>
+  <polyline
+    points="62,256 148,256 174,194 194,318 218,256 244,256 256,130 268,256 294,256 318,192 338,320 362,256 450,256"
+    fill="none" stroke="#38bdf8" stroke-width="22"
+    stroke-linecap="round" stroke-linejoin="round" opacity="0.12"/>
+  <polyline
+    points="62,256 148,256 174,194 194,318 218,256 244,256 256,130 268,256 294,256 318,192 338,320 362,256 450,256"
+    fill="none" stroke="#0ea5e9" stroke-width="13"
+    stroke-linecap="round" stroke-linejoin="round" opacity="0.28"/>
+  <!-- Solid main trace -->
+  <polyline
+    points="62,256 148,256 174,194 194,318 218,256 244,256 256,130 268,256 294,256 318,192 338,320 362,256 450,256"
+    fill="none" stroke="#0ea5e9" stroke-width="9"
+    stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Alert dot at the main spike peak — orange = threat detected -->
+  <!-- Outer glow rings -->
+  <circle cx="256" cy="130" r="40" fill="#f97316" opacity="0.07"/>
+  <circle cx="256" cy="130" r="27" fill="#f97316" opacity="0.14"/>
+  <circle cx="256" cy="130" r="18" fill="#f97316" opacity="0.28"/>
+  <!-- Core -->
+  <circle cx="256" cy="130" r="12" fill="#f97316"/>
+
+  <!-- Minor peak dots (secondary events) -->
+  <circle cx="174" cy="194" r="7"  fill="#38bdf8" opacity="0.85"/>
+  <circle cx="318" cy="192" r="7"  fill="#38bdf8" opacity="0.85"/>
+
+  <!-- Wordmark -->
+  <text
+    x="256" y="478"
+    font-family="'Courier New', Courier, monospace"
+    font-size="46"
+    font-weight="bold"
+    fill="#0ea5e9"
+    text-anchor="middle"
+    letter-spacing="4"
+    opacity="0.88">ETW&#xB7;TI</text>
+
+</svg>

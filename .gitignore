@@ -1,0 +1,77 @@
+# ============================================================
+# EtwTiSuite — .gitignore
+# ============================================================
+
+# ---- Build outputs ----
+x64/
+*/x64/
+**/x64/
+*.sys
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.obj
+*.res
+*.log
+
+# ---- Driver build intermediates ----
+*.cat
+*.inf2cat/
+*.stampinf/
+
+# ---- Code signing artifacts (sensitive — never commit private keys) ----
+*.pfx
+*.cer
+*.pvk
+*.spc
+EtwTiTestCert.*
+
+# ---- Visual Studio ----
+.vs/
+*.user
+*.suo
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.cache
+*.VC.db
+*.VC.VC.opendb
+ipch/
+Debug/
+Release/
+[Dd]ebug/
+[Rr]elease/
+
+# ---- MSBuild intermediates ----
+[Oo]bj/
+*/[Oo]bj/
+GeneratedFiles/
+*.tlog
+*.lastbuildstate
+*.unsuccessfulbuild
+*.FileListAbsolute.txt
+BuildLog.htm
+
+# ---- Third-party (clone separately — see README) ----
+third_party/imgui/
+
+# ---- Log / output files produced at runtime ----
+*.jsonl
+*.etl
+build_driver.log
+
+# ---- OS artifacts ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Claude Code local settings ----
+.claude/
+
+# EtwTiViewer integrated-mode verification artifacts
+verify_capture.jsonl
+verify_capture.stderr.txt

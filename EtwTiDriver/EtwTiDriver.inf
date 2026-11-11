@@ -1,0 +1,30 @@
+; EtwTiDriver.inf — INF file for kernel driver installation
+; Supports Windows 10 and Windows 11 (x64)
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = "System"
+ClassGuid   = {4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider    = %ManufacturerName%
+DriverVer   = 01/01/2024,1.0.0.0
+CatalogFile = EtwTiDriver.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12       ; %SystemRoot%\system32\drivers
+
+[DefaultInstall.NT$ARCH$.10.0...]
+CopyFiles = Driver_CopyFiles
+
+[Driver_CopyFiles]
+EtwTiDriver.sys
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+EtwTiDriver.sys = 1
+
+[Strings]
+ManufacturerName = "EtwTiSuite"
+DiskName         = "EtwTiDriver Installation Disk"
