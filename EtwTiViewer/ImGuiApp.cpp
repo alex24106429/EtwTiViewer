@@ -88,10 +88,6 @@ static bool NameMatchesGroup(const char* name, const KwGroup& g) {
 
 ImGuiApp::ImGuiApp()
     : m_evBuf(50000)
-    , m_pipe([this](TiEvent&& ev) {
-          if (m_logToFile) LogEventToFile(ev);
-          m_evBuf.Push(std::move(ev));
-      })
     , m_lastFlush(std::chrono::steady_clock::now())
 {
     for (auto& k : kKeywords)
@@ -99,10 +95,8 @@ ImGuiApp::ImGuiApp()
 }
 
 ImGuiApp::~ImGuiApp() {
-    m_pipe.Stop();
     m_etwConsumer.Stop();
     SecurityTrace::Cleanup();
-    m_driver.Close();
     if (m_logFile.is_open()) m_logFile.close();
 }
 
@@ -150,9 +144,6 @@ bool ImGuiApp::Init(ID3D11Device* device, ID3D11DeviceContext* ctx, HWND hwnd) {
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(device, ctx);
 
-    m_driverOpen = m_driver.TryOpen();
-    m_pipe.Start();
-
     /* Automation hook: --autostart / ETWTI_AUTOSTART=1 attaches immediately. */
     {
         WCHAR autostart[8] = {};
@@ -184,7 +175,6 @@ void ImGuiApp::Render() {
                 : L"EtwTi Viewer \x2014 [Stopped]");
     }
 
-    RefreshDriverStatus();
     FlushLogIfDue();
 
     /* ---- Full-screen single window ---- */
@@ -315,70 +305,6 @@ void ImGuiApp::RenderToolbar() {
         ImGui::SameLine(0.0f, 10.0f);
     };
 
-    /* --- DRIVER (optional) --- */
-    {
-        char tip[320];
-        if (m_driverOpen) {
-            snprintf(tip, sizeof(tip),
-                "EtwTiDriver.sys (optional)\n"
-                "  Device : \\\\.\\EtwTiDriver\n"
-                "  Handle : Open\n"
-                "  Session: %s\n\n"
-                "  Adds PROCESS_CREATE / PROCESS_EXIT /\n"
-                "  IMAGE_LOAD via kernel PS callbacks.\n"
-                "  Not required for ETW-TI.",
-                m_sessionRunning ? "Running" : "Stopped");
-        } else {
-            snprintf(tip, sizeof(tip),
-                "EtwTiDriver.sys (optional)\n"
-                "  Status : Not loaded\n\n"
-                "  ETW-TI works without the driver, PPL or a\n"
-                "  kernel patch.  The driver only adds kernel\n"
-                "  process/image notifications.");
-        }
-        StatusIndicator(
-            m_driverOpen ? "Driver" : "Driver (optional)",
-            m_driverOpen ? ImVec4{0.20f, 0.85f, 0.20f, 1.0f}
-                         : ImVec4{0.45f, 0.45f, 0.45f, 1.0f},
-            tip);
-    }
-
-    VSep();
-
-    /* --- PIPE (optional, driver only) --- */
-    {
-        const char* pipeLabel;
-        ImVec4      pipeCol;
-        const char* pipeTip;
-
-        if (m_pipe.IsConnected()) {
-            pipeLabel = "Pipe";
-            pipeCol   = {0.20f, 0.85f, 0.20f, 1.0f};
-            pipeTip   = "Kernel \xe2\x86\x92 Viewer named pipe (optional)\n"
-                        "  Path  : \\\\.\\pipe\\EtwTiForwarder\n"
-                        "  Status: Connected\n\n"
-                        "  Delivers: PROCESS_CREATE, PROCESS_EXIT,\n"
-                        "            IMAGE_LOAD\n"
-                        "  (kernel PS callbacks from the optional driver)";
-        } else if (m_pipe.IsReconnecting()) {
-            pipeLabel = "Pipe (waiting)";
-            pipeCol   = {0.90f, 0.75f, 0.10f, 1.0f};
-            pipeTip   = "Kernel \xe2\x86\x92 Viewer named pipe (optional)\n"
-                        "  Status: Listening\n\n"
-                        "  Only the optional EtwTiDriver connects here.\n"
-                        "  ETW-TI events arrive without it.";
-        } else {
-            pipeLabel = "Pipe (idle)";
-            pipeCol   = {0.45f, 0.45f, 0.45f, 1.0f};
-            pipeTip   = "Kernel \xe2\x86\x92 Viewer named pipe (optional)\n"
-                        "  Status: Idle\n\n"
-                        "  Only the optional EtwTiDriver uses this pipe.";
-        }
-        StatusIndicator(pipeLabel, pipeCol, pipeTip);
-    }
-
-    VSep();
-
     /* --- ETW-TI CONSUMER (AutoLogger / SecurityTrace) --- */
     {
         bool        etwOk = m_etwConsumer.IsRunning();
@@ -392,7 +318,7 @@ void ImGuiApp::RenderToolbar() {
             etwCol   = {0.20f, 0.85f, 0.20f, 1.0f};
             snprintf(tip, sizeof(tip),
                 "Microsoft-Windows-Threat-Intelligence\n"
-                "  Mode      : AutoLogger (no PPL / driver / kernel patch)\n"
+                "  Mode      : AutoLogger attach (no PPL required)\n"
                 "  Session   : %ls (real-time)\n"
                 "  Logger ID : %lu%s\n"
                 "  Keyword   : 0x%016llX\n"
@@ -432,7 +358,7 @@ void ImGuiApp::RenderToolbar() {
                 "  Status  : Idle (not attached)\n\n"
                 "  One-time setup (elevated, then reboot):\n"
                 "    EtwTiViewer\\install_autologger.ps1\n\n"
-                "  No PPL, driver or kernel patch required.",
+                "  No PPL required: the kernel enabled the provider at boot.",
                 s.name.empty() ? EtwConsumer::kDefaultSessionName
                                : s.name.c_str());
         }
@@ -448,19 +374,11 @@ void ImGuiApp::RenderToolbar() {
             "Event throughput\n"
             "  EVT     : ETW-TI events decoded this session\n"
             "  BUF     : events currently in the ring buffer\n"
-            "            (oldest are overwritten when full)\n"
-            "  EVT/s   : driver-reported throughput (optional)");
+            "            (oldest are overwritten when full)");
         ImGui::BeginGroup();
-        if (m_driverOpen) {
-            ImGui::Text("EVT \xe2\x94\x82 %llu   EVT/s \xe2\x94\x82 %4u   BUF \xe2\x94\x82 %zu",
-                (unsigned long long)m_etwConsumer.EventCount(),
-                m_driverStatus.EventsPerSec,
-                m_evBuf.Size());
-        } else {
-            ImGui::Text("EVT \xe2\x94\x82 %llu   BUF \xe2\x94\x82 %zu",
-                (unsigned long long)m_etwConsumer.EventCount(),
-                m_evBuf.Size());
-        }
+        ImGui::Text("EVT \xe2\x94\x82 %llu   BUF \xe2\x94\x82 %zu",
+            (unsigned long long)m_etwConsumer.EventCount(),
+            m_evBuf.Size());
         ImGui::EndGroup();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
             ImGui::BeginTooltip();
@@ -476,19 +394,6 @@ void ImGuiApp::RenderToolbar() {
     ImGui::SliderInt("Rows", &m_maxRows, 500, 50000);
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         ImGui::SetTooltip("Maximum rows rendered in the event table.\nOldest events are hidden (not discarded) above this limit.");
-    ImGui::SameLine(0.0f, 10.0f);
-
-    /* Verbose KD toggle — sends IOCTL_ETWTI_SET_VERBOSE */
-    bool prevVerbose = m_verboseDebug;
-    ImGui::Checkbox("KD Verbose", &m_verboseDebug);
-    if (m_verboseDebug != prevVerbose && m_driverOpen)
-        m_driver.SetVerbose(m_verboseDebug);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip(
-            "Send IOCTL_ETWTI_SET_VERBOSE to the driver.\n"
-            "Enables per-event DbgPrintEx output in WinDbg.\n\n"
-            "Prerequisite:\n"
-            "  kd> ed nt!Kd_IHVDRIVER_Mask 0xFFFFFFFF");
     ImGui::SameLine(0.0f, 10.0f);
 
     ImGui::Checkbox("Auto-scroll", &m_autoScroll);
@@ -622,40 +527,18 @@ void ImGuiApp::RenderEventTable() {
 }
 
 /* =========================================================================
- * Driver helpers
+ * ETW-TI session helpers
  * ========================================================================= */
-
-void ImGuiApp::RefreshDriverStatus() {
-    /* The kernel driver is optional: it only adds process/image notifications. */
-    if (!m_driverOpen)
-        m_driverOpen = m_driver.TryOpen();
-
-    if (m_driverOpen) {
-        if (!m_driver.QueryStatus(m_driverStatus)) {
-            m_driver.Close();
-            m_driverOpen = false;
-            memset(&m_driverStatus, 0, sizeof(m_driverStatus));
-        }
-    } else {
-        memset(&m_driverStatus, 0, sizeof(m_driverStatus));
-    }
-}
 
 void ImGuiApp::DoStart() {
     ULONGLONG mask = BuildKeywordMask(m_keywords);
 
-    /* Optional kernel driver: PS callbacks for PROCESS_CREATE/EXIT + IMAGE_LOAD. */
-    if (!m_driverOpen)
-        m_driverOpen = m_driver.TryOpen();
-    if (m_driverOpen)
-        m_driver.Start(mask);
-
     /*
      * Attach the user-mode ETW-TI consumer to the pre-existing AutoLogger
      * session.  This is the part that receives ALLOCVM_REMOTE, PROTECTVM_*,
-     * MAPVIEW_*, etc.  It needs no PPL, no driver and no kernel patch: the
-     * kernel enabled the provider at boot, and SecurityTrace detours the
-     * sechost ControlTraceW(QUERY) check inside this process.
+     * MAPVIEW_*, etc.  It needs no PPL: the kernel enabled the provider at
+     * boot, and SecurityTrace detours the sechost ControlTraceW(QUERY) check
+     * inside this process.
      */
     m_etwError = m_etwConsumer.Start(mask, [this](TiEvent&& ev) {
         if (m_logToFile) LogEventToFile(ev);
@@ -668,8 +551,6 @@ void ImGuiApp::DoStart() {
 void ImGuiApp::DoStop() {
     m_etwConsumer.Stop();
     m_etwError.clear();
-    if (m_driverOpen)
-        m_driver.Stop();
     m_sessionRunning = false;
 }
 

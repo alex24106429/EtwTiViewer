@@ -6,7 +6,6 @@
 x64/
 */x64/
 **/x64/
-*.sys
 *.exe
 *.dll
 *.pdb
@@ -16,18 +15,6 @@ x64/
 *.obj
 *.res
 *.log
-
-# ---- Driver build intermediates ----
-*.cat
-*.inf2cat/
-*.stampinf/
-
-# ---- Code signing artifacts (sensitive — never commit private keys) ----
-*.pfx
-*.cer
-*.pvk
-*.spc
-EtwTiTestCert.*
 
 # ---- Visual Studio ----
 .vs/
@@ -62,7 +49,6 @@ third_party/imgui/
 # ---- Log / output files produced at runtime ----
 *.jsonl
 *.etl
-build_driver.log
 
 # ---- OS artifacts ----
 Thumbs.db

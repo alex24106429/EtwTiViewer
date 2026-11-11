@@ -22,8 +22,6 @@
 #include <mutex>
 
 #include "EventBuffer.h"
-#include "PipeClient.h"
-#include "DriverControl.h"
 #include "EtwConsumer.h"
 
 /* -------------------------------------------------------------------------
@@ -60,10 +58,9 @@ private:
     void RenderKeywordsContent();   /* renders inside the already-begun child */
     void RenderEventTable();        /* renders inside the already-begun child */
 
-    /* ---- IOCTL helpers ---- */
+    /* ---- Session helpers ---- */
     void DoStart();
     void DoStop();
-    void RefreshDriverStatus();
 
     static ULONGLONG BuildKeywordMask(const std::vector<KeywordEntry>& kw);
     static RowColor  ClassifyEvent(const TiEvent& ev);
@@ -85,12 +82,6 @@ private:
     /* Circular event buffer (50 000 entries) */
     EventBuffer         m_evBuf;
 
-    /* Pipe client */
-    PipeClient          m_pipe;
-
-    /* Driver IOCTL */
-    DriverControl       m_driver;
-
     /* Direct user-mode ETW-TI consumer (receives ALLOCVM/PROTECTVM/etc.) */
     EtwConsumer         m_etwConsumer;
     std::string         m_etwError;     /* shown in toolbar on failure */
@@ -99,14 +90,9 @@ private:
     bool                m_sessionRunning  = false;
     bool                m_autoScroll      = true;
     bool                m_logToFile       = false;
-    bool                m_verboseDebug    = false;
     char                m_logPath[512]    = "etw_ti.jsonl";
     char                m_filter[256]     = {};
     int                 m_maxRows         = 5000;
-
-    /* Cached driver status */
-    ETWTI_STATUS_OUTPUT m_driverStatus    = {};
-    bool                m_driverOpen      = false;
 
     /* File log */
     std::ofstream       m_logFile;

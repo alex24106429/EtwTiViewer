@@ -16,7 +16,7 @@
 #include <mutex>
 #include <Windows.h>
 
-/* Decoded event from the pipe */
+/* Decoded ETW-TI event */
 struct TiEvent {
     FILETIME    timestamp;
     uint16_t    eventId;

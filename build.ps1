@@ -4,9 +4,8 @@
     Build EtwTiViewer (Release|x64), cloning ImGui if necessary.
 
 .DESCRIPTION
-    Only the viewer project is built.  The optional EtwTiDriver is NOT needed
-    for Threat-Intelligence consumption and is not built (it also requires
-    test-signing and a WDK).
+    Builds the viewer, which consumes Threat-Intelligence from the AutoLogger
+    session registered by install_autologger.ps1.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\build.ps1

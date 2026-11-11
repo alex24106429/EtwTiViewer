@@ -10,7 +10,7 @@
       * install_autologger.ps1 already run, followed by a reboot
       * EtwTiViewer built (build.ps1)
 
-    No kernel debugger, PPL, driver or test-signing is used.
+    No PPL or kernel debugging is used.
 
 .PARAMETER Seconds
     Capture duration per attach.
@@ -212,7 +212,7 @@ if ($summary -and $summary -match '"events":(\d+)') { $viewerEvents = [int]$Matc
 Write-Host ''
 if ($viewer.ExitCode -eq 0 -and $viewerEvents -gt 0) {
     Write-Host 'SUCCESS: live Threat-Intelligence events received.' -ForegroundColor Green
-    Write-Host '         No PPL, no driver, no kernel patch.' -ForegroundColor Green
+    Write-Host '         No PPL required: the kernel enabled the provider at boot.' -ForegroundColor Green
     exit 0
 }
 

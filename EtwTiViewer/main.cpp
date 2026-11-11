@@ -4,9 +4,9 @@
  * Creates a DirectX 11 device and swap chain, initialises ImGui,
  * and runs the standard message + render loop.
  *
- * The application must run as Administrator so it can:
- *   (a) open \\.\EtwTiDriver with CreateFile (kernel driver device),
- *   (b) call DeviceIoControl to start/stop the ETW session.
+ * The application must run as Administrator so it can read the AutoLogger
+ * registry key under HKLM\SYSTEM\CurrentControlSet\Control\WMI\Autologger
+ * and attach to the SecurityTrace-protected session.
  *
  * The embedded manifest deliberately requests asInvoker instead of
  * requireAdministrator: elevation is performed at runtime by
@@ -511,7 +511,7 @@ int WINAPI WinMain(
             L"  EtwTiViewer.exe --autostart\n\n"
             L"One-time setup (elevated):\n"
             L"  install_autologger.ps1   then reboot\n\n"
-            L"No PPL, driver or kernel patch is required.",
+            L"No PPL is required: the kernel enabled the provider at boot.",
             L"EtwTiViewer", MB_OK | MB_ICONINFORMATION);
         return 0;
     }

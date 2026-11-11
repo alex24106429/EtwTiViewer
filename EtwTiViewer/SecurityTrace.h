@@ -1,7 +1,7 @@
 #pragma once
 /*
  * SecurityTrace.h — consume a SecurityTrace-protected AutoLogger session
- * without Antimalware-PPL, a driver, or a kernel patch.
+ * without Antimalware-PPL.
  *
  * HOW IT WORKS
  * ============

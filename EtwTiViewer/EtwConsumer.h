@@ -3,16 +3,12 @@
  * EtwConsumer.h — Real-time consumer for the Microsoft-Windows-Threat-Intelligence
  * provider ({F4E1897C-BB5D-5668-F1D8-040F4D8DD344}) via a SecurityTrace AutoLogger.
  *
- * The upstream viewer created its own trace session with StartTraceW() and then
- * called EnableTraceEx2(), which the kernel denies unless the calling process is
- * PS_PROTECTED_ANTIMALWARE_LIGHT (0x31).  That is why the original tool needed a
- * kernel debugger to patch EPROCESS->Protection.
- *
- * This version instead attaches to a *pre-existing* AutoLogger session that the
- * kernel created at boot (see SecurityTrace.h).  The provider enablement happened
- * in kernel context, so no PPL is required; the only obstacle is the internal
- * ControlTraceW(QUERY) performed by sechost, which SecurityTrace detours in user
- * mode.  No driver and no kernel patch are involved.
+ * The kernel only enables the provider for PS_PROTECTED_ANTIMALWARE_LIGHT
+ * callers.  This consumer avoids that check by attaching to a *pre-existing*
+ * AutoLogger session that the kernel created at boot (see SecurityTrace.h).
+ * The provider enablement happened in kernel context, so no PPL is required;
+ * the only obstacle is the internal ControlTraceW(QUERY) performed by sechost,
+ * which SecurityTrace detours in user mode.
  *
  * USAGE
  * =====

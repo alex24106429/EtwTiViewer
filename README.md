@@ -8,14 +8,10 @@ A research tool for live exploration of the **Microsoft-Windows-Threat-Intellige
 
 > **Research and education only.** Run exclusively in isolated VMs. Some parts of this project were built with LLM-assisted development and may contain bugs, be careful using this tool in production environments.
 
-> **This copy is integrated with ThreatIntelligenceConsumer.**
-> ETW-TI consumption no longer requires kernel debugging, an EPROCESS patch,
-> test-signing, or the kernel driver.  The viewer attaches to a
-> SecurityTrace-protected **AutoLogger** session that the kernel starts at boot
-> and detours `sechost!ControlTraceW` inside its own process.  The same
-> technique, and the investigation behind it, are documented in
-> [`../REPORT.md`](../REPORT.md).  The legacy WinDbg + driver path described
-> below still exists but is **optional**.
+ETW-TI consumption uses an **AutoLogger** session that the kernel starts at
+boot; the viewer attaches to it and detours `sechost!ControlTraceW` inside its
+own process.  No kernel-mode component, kernel debugger, test-signing, or
+reboot after every run is involved.
 
 ![Interface](screenshots/interface.png)
 
@@ -40,16 +36,19 @@ A research tool for live exploration of the **Microsoft-Windows-Threat-Intellige
 
 ---
 
-## Why access is restricted — and how we bypass it
+## How access works: AutoLogger + in-process detour
 
-The kernel requires the subscribing process to be **`PS_PROTECTED_ANTIMALWARE_LIGHT`** (`EPROCESS->Protection = 0x31`), backed by an ELAM certificate Microsoft only issues to commercial security vendors. Without it, `EnableTraceEx2` returns `ERROR_ACCESS_DENIED`.
+The kernel only enables the provider for a subscriber that is
+**`PS_PROTECTED_ANTIMALWARE_LIGHT`**, backed by an ELAM certificate Microsoft
+issues to commercial security vendors.  Without it, `EnableTraceEx2` returns
+`ERROR_ACCESS_DENIED`.
 
-### Integrated mode (default in this copy): AutoLogger + in-process detour
+EtwTiViewer avoids that requirement entirely:
 
 1. `install_autologger.ps1` writes an AutoLogger key that enables
    `Microsoft-Windows-Threat-Intelligence` with all keywords.
 2. At boot the **kernel** creates the session and enables the provider with no
-   caller identity, so the PPL check never runs. The kernel marks the session
+   caller identity, so the PPL check never runs.  The kernel marks the session
    `SecurityTrace`-protected.
 3. `EtwTiViewer.exe` attaches with `OpenTraceW`/`ProcessTrace`.  sechost
    internally issues `ControlTraceW(QUERY)` on the session, which is denied for
@@ -57,40 +56,14 @@ The kernel requires the subscribing process to be **`PS_PROTECTED_ANTIMALWARE_LI
    viewer's own process and answers the query from a fabricated
    `EVENT_TRACE_PROPERTIES` built from the AutoLogger registry key.
 
-No driver, no test-signing, no kernel debugger, no reboot after every run
-(only after installing the AutoLogger key).  The detour is a user-mode
-modification of the viewer's own address space and is restored on exit.
+The provider is enabled by the kernel at boot; the viewer only consumes the
+resulting real-time session.  There is no kernel-mode component, no
+test-signing, and no kernel debugger.  The detour is a user-mode modification
+of the viewer's own address space and is restored on exit.
 
 The signal path is identical to the commercial-EDR path: the kernel's
 `EtwTiLog*` instrumentation writes into a real-time ETW session that this
 process consumes.
-
-### Legacy mode: patch `EPROCESS->Protection` in WinDbg
-
-If you prefer the original mechanism (or want to compare the two), the
-one-byte `Protection` patch still works.  It is non-persistent — a process
-restart resets it.
-
-```
-PS_PROTECTED_ANTIMALWARE_LIGHT = 0x31
-  ↳ Type   = PsProtectedTypeProtectedLight  (bits [2:0] = 3)
-  ↳ Signer = PsProtectedSignerAntimalware   (bits [6:3] = 1)
-```
-
-**WinDbg procedure** (run with `EtwTiViewer.exe` already open):
-
-```
-kd> !process 0 0 EtwTiViewer.exe
-   PROCESS ffffe7054f0f8080  ...
-
-kd> dt nt!_EPROCESS ffffe7054f0f8080 Protection
-   +0x87a Protection : _PS_PROTECTION
-
-kd> eb ffffe7054f0f8080+0x87a 31
-kd> g
-```
-
-> The `Protection` offset varies between Windows builds — always query it with `dt` rather than hardcoding it.
 
 ---
 
@@ -103,50 +76,30 @@ kd> g
 │  ntoskrnl.exe — ETW-TI instrumentation                               │
 │    EtwTiLogAllocateVirtualMemory() ─────────────────────────────►    │
 │    EtwTiLogProtectVirtualMemory()     ETW real-time session          │
-│    EtwTiLogMapViewOfSection()         "EtwTiViewerSession"           │
-│                                                                      │
-│  EtwTiDriver.sys (WDM)                                               │
-│    PsSetCreateProcessNotifyRoutineEx  ──► PROCESS_CREATE/EXIT        │
-│    PsSetLoadImageNotifyRoutine        ──► IMAGE_LOAD                 │
-│    Pipe worker: ZwCreateFile → \\.\pipe\EtwTiForwarder               │
-│    IOCTL_ETWTI_START runs in EtwTiViewer.exe context                 │
-│      (so the EPROCESS->Protection check hits the patched process)    │
-└───────────────────────────┬──────────────────────────────────────────┘
-                            │ named pipe — binary wire protocol
+│    EtwTiLogMapViewOfSection()         "0MyThreatIntelTrace"          │
+│                                       (AutoLogger, started at boot)  │
+└──────────────────────────────────────────────────────────────────────┘
+                            │ real-time ETW
                             ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │  EtwTiViewer.exe  (C++17, ImGui + DirectX 11)                        │
 │                                                                      │
-│  PipeClient     — ReadFile(pipe) → decode PIPE_EVENT_HEADER          │
-│  EtwConsumer    — StartTraceW / EnableTraceEx2 / ProcessTrace        │
+│  SecurityTrace  — detours sechost!ControlTraceW in this process      │
+│  EtwConsumer    — OpenTraceW / ProcessTrace                          │
 │                   TDH decodes PEVENT_RECORD → TiEvent                │
-│  Both sources   → EventBuffer (ring, 50 000 events)                  │
-│  Render thread  → ImGui UI, JSONL file logging                       │
+│  EventBuffer    — ring buffer (50 000 events)                        │
+│  Render thread  — ImGui UI, JSONL file logging                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-The optional driver path is shown for reference; in integrated mode the ETW-TI
-consumer attaches to the pre-existing `0MyThreatIntelTrace` AutoLogger session
-and the kernel driver is simply absent.
-
-**Event sources**
+**Event source**
 
 | Source | Events | Requires |
 |---|---|---|
-| `PsSetCreateProcessNotifyRoutineEx` | `PROCESS_CREATE`, `PROCESS_EXIT` | Optional driver loaded |
-| `PsSetLoadImageNotifyRoutine` | `IMAGE_LOAD` | Optional driver loaded |
-| ETW-TI consumer (user-mode) | All keyword-gated events | AutoLogger session (integrated mode) **or** `EPROCESS->Protection = 0x31` (legacy) |
+| ETW-TI consumer (user-mode) | All keyword-gated events | AutoLogger session registered by `install_autologger.ps1` |
 
-**Wire format** (`PIPE_EVENT_HEADER`, 18 bytes): `Magic (4)` · `EventId (2)` · `Pid (4)` · `Tid (4)` · `Timestamp/FILETIME (8)` · `NameLen (2)` · `FieldsLen (2)` — followed by a UTF-8 name and `key=value\0` field pairs. `PIPE_TYPE_MESSAGE` ensures each `ReadFile` returns exactly one event.
-
-**IOCTL interface**
-
-| IOCTL | I/O | Purpose |
-|---|---|---|
-| `IOCTL_ETWTI_START` | In: `ULONGLONG KeywordMask` | Start session; register provider in caller context |
-| `IOCTL_ETWTI_STOP` | — | Stop session; remove PS callbacks |
-| `IOCTL_ETWTI_STATUS` | Out: running / EVT/s / dropped | Poll driver health |
-| `IOCTL_ETWTI_SET_VERBOSE` | In: `ULONG` | Toggle per-event `DbgPrintEx` |
+The AutoLogger registry key lives under
+`HKLM\SYSTEM\CurrentControlSet\Control\WMI\Autologger\0MyThreatIntelTrace`.
 
 ---
 
@@ -154,17 +107,17 @@ and the kernel driver is simply absent.
 
 ```
 EtwTiSuite/
-├── EtwTiDriver/
-│   ├── EtwTiDriver.c        DriverEntry, IOCTL handler, pipe server, PS callbacks
-│   ├── EtwTiShared.h        IOCTL codes + pipe wire types (shared with viewer)
-│   ├── EtwTiDriver.inf      Non-PnP driver manifest
-│   └── build.bat            MSBuild + self-sign → deploy-ready .sys
 ├── EtwTiViewer/
+│   ├── main.cpp             WinMain, runtime elevation, D3D11 + ImGui loop
 │   ├── ImGuiApp.h/.cpp      UI: keyword panel, toolbar, event table, logging
-│   ├── EtwConsumer.h/.cpp   Real-time ETW consumer
-│   ├── PipeClient.h/.cpp    Pipe reader → EventBuffer
-│   ├── DriverControl.h/.cpp IOCTL wrappers
-│   └── EventBuffer.h        Thread-safe ring buffer (50 000 events)
+│   ├── EtwConsumer.h/.cpp   Real-time ETW-TI consumer
+│   ├── SecurityTrace.h/.cpp AutoLogger discovery + ControlTraceW detour
+│   ├── Headless.h/.cpp      CLI capture mode for automation/CI
+│   ├── EventBuffer.h        Thread-safe ring buffer (50 000 events)
+│   └── EtwTiViewer.vcxproj
+├── install_autologger.ps1   Register/remove/query the AutoLogger session
+├── verify.ps1               End-to-end capture + injection-activity check
+├── build.ps1                Build the viewer (Release|x64)
 ├── third_party/imgui/       Clone separately (see Setup)
 └── EtwTiSuite.sln
 ```
@@ -173,8 +126,6 @@ EtwTiSuite/
 
 ## Prerequisites
 
-### Required (integrated mode)
-
 | Requirement | Notes |
 |---|---|
 | Windows 10 21H2+ / Windows 11 x64 | Run in a VM |
@@ -182,17 +133,9 @@ EtwTiSuite/
 | Administrator account | One-time AutoLogger registration; the viewer self-elevates on launch |
 | One reboot after registration | The kernel creates AutoLogger sessions at boot |
 
-### Optional (legacy driver path only)
-
-| Requirement | Notes |
-|---|---|
-| WDK 10.0.22621+ | Only for `EtwTiDriver.sys` (PROCESS_CREATE / IMAGE_LOAD) |
-| Test-signing enabled + Secure Boot off | Only for the driver |
-| WinDbg kernel debug session | Only for the legacy `EPROCESS->Protection` patch |
-
 ---
 
-## Setup (no kernel debugging)
+## Setup
 
 ```powershell
 # 1. Register the AutoLogger session (self-elevates), then reboot
@@ -213,31 +156,14 @@ powershell -ExecutionPolicy Bypass -File .\verify.ps1
 .\EtwTiViewer\x64\Release\EtwTiViewer.exe
 ```
 
-The driver is **not** built or required.  If you still want the kernel
-process/image notifications, the legacy setup below remains available:
-
-```cmd
-# optional legacy driver
-bcdedit /set testsigning on && shutdown /r /t 0
-cd EtwTiDriver && build.bat
-sc create EtwTiDriver type= kernel start= demand binPath= "C:\...\EtwTiDriver.sys"
-sc start EtwTiDriver
-```
-
 ---
 
 ## Usage
 
-**1. (Integrated mode) Nothing to patch.**  If you are using the legacy driver
-path, patch `EPROCESS->Protection` (see WinDbg procedure above) while
-`EtwTiViewer.exe` is running.
-
-**2. Launch the viewer** — `EtwTiViewer\x64\Release\EtwTiViewer.exe`.  The
+**1. Launch the viewer** — `EtwTiViewer\x64\Release\EtwTiViewer.exe`.  The
 viewer asks for elevation itself on startup, so a normal desktop launch is
-enough. Status bar indicators:
-- **Driver (optional)** — green when `\\.\EtwTiDriver` opens; grey = not loaded (ETW-TI still works)
-- **Pipe (optional)** — green when the driver connects to the forwarder pipe
-- **ETW-TI (AutoLogger)** — green when the viewer is attached to the protected session; no patch required
+enough.  The status bar shows **ETW-TI (AutoLogger)** in green when the viewer
+is attached to the protected session.
 
 > **Shared folders / network drives.**  The manifest deliberately requests
 > `asInvoker`; elevation happens in `EnsureElevated()` in `main.cpp`.  The UAC
@@ -250,16 +176,24 @@ enough. Status bar indicators:
 > UAC still applies unless the account is configured to elevate without
 > prompting.
 
-**3. Capture:**
+**2. Capture:**
 1. Check keywords in the **Keywords** panel (or **Select All**)
-2. Click **Start** — driver IOCTL + ETW consumer session begin simultaneously
+2. Click **Start** — the viewer attaches to the AutoLogger session
 3. Events stream into the **Events** table in real time
 4. Use **Filter** to substring-match on name or any field value
 5. Toggle **Log [ON]** to stream to a JSONL file
-6. Hover any status indicator for a detailed tooltip
+6. Hover the status indicator for a detailed tooltip
 7. Click **Stop** → **Clear** to reset
 
-**Kernel debug output:** `kd> ed nt!Kd_IHVDRIVER_Mask 0xFFFFFFFF` then enable **KD Verbose** in the toolbar.
+Keywords selected in the UI are a **client-side filter**: the kernel-side
+provider mask was fixed when the AutoLogger was created at boot.  Changing the
+registry mask requires a reboot.
+
+**Headless/CI mode:**
+
+```powershell
+.\EtwTiViewer\x64\Release\EtwTiViewer.exe --capture 30 --log out.jsonl --keywords 0x3FA5444
+```
 
 ---
 

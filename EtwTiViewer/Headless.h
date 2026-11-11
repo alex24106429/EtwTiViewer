@@ -7,7 +7,7 @@
  *
  * This bypasses ImGui/DirectX entirely and exercises exactly the same
  * EtwConsumer + SecurityTrace path as the GUI, so CI can prove that live
- * Threat-Intelligence events are being received without PPL/driver/kernel
+ * Threat-Intelligence events are being received without PPL or kernel
  * patching.
  */
 

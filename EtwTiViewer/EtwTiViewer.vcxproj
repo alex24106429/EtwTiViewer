@@ -37,7 +37,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\third_party\imgui;$(ProjectDir)..\third_party\imgui\backends;$(ProjectDir)..\EtwTiDriver;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\third_party\imgui;$(ProjectDir)..\third_party\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -57,7 +57,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\third_party\imgui;$(ProjectDir)..\third_party\imgui\backends;$(ProjectDir)..\EtwTiDriver;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\third_party\imgui;$(ProjectDir)..\third_party\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -71,8 +71,6 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="ImGuiApp.cpp" />
-    <ClCompile Include="PipeClient.cpp" />
-    <ClCompile Include="DriverControl.cpp" />
     <ClCompile Include="EtwConsumer.cpp" />
     <ClCompile Include="SecurityTrace.cpp" />
     <ClCompile Include="Headless.cpp" />
@@ -86,14 +84,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EventBuffer.h" />
-    <ClInclude Include="PipeClient.h" />
     <ClInclude Include="EtwConsumer.h" />
     <ClInclude Include="SecurityTrace.h" />
     <ClInclude Include="Headless.h" />
-    <ClInclude Include="DriverControl.h" />
     <ClInclude Include="ImGuiApp.h" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="..\EtwTiDriver\EtwTiShared.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="EtwTiViewer.rc" />
