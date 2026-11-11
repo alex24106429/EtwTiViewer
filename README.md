@@ -111,6 +111,7 @@ EtwTiSuite/
 │   ├── main.cpp             WinMain, runtime elevation, D3D11 + ImGui loop
 │   ├── ImGuiApp.h/.cpp      UI: keyword panel, toolbar, event list, details panel, logging
 │   ├── EtwConsumer.h/.cpp   Real-time ETW-TI consumer
+│   ├── ProcessInfo.h/.cpp   Lazy process metadata for selected events
 │   ├── SecurityTrace.h/.cpp AutoLogger discovery + ControlTraceW detour
 │   ├── Headless.h/.cpp      CLI capture mode for automation/CI
 │   ├── EventBuffer.h        Thread-safe ring buffer (50 000 events)
@@ -182,12 +183,17 @@ is attached to the protected session.
 3. Events stream into the event list in real time
 4. Click an event row to inspect every decoded property in the **details
    panel** on the right. Each value has a **Copy** button and a right-click
-   copy menu; **Copy event as JSON** copies the whole event. Drag the divider
-   to resize the panel.
-5. Use **Filter** to substring-match on name or any field value
-6. Toggle **Log [ON]** to stream to a JSONL file
-7. Hover the status indicator for a detailed tooltip
-8. Click **Stop** → **Clear** to reset
+   copy menu; **Copy event as JSON** copies the event, its properties, and the
+   resolved process context. Drag the divider to resize the panel.
+5. The same panel lazily resolves the **calling and target process context**
+   when you select an event: image name/path, command line, immediate parent,
+   user account, and integrity level. Lookups happen once per selection, not
+   per event. Processes that have exited or are protected may only expose
+   partial data; the panel shows the reason.
+6. Use **Filter** to substring-match on name or any field value
+7. Toggle **Log [ON]** to stream to a JSONL file
+8. Hover the status indicator for a detailed tooltip
+9. Click **Stop** → **Clear** to reset
 
 Keywords selected in the UI are a **client-side filter**: the kernel-side
 provider mask was fixed when the AutoLogger was created at boot.  Changing the

@@ -12,7 +12,8 @@
  *   └────────────┴───────────────────────────┴─────────────────────┘
  *
  * Clicking a row selects it; the right-hand panel shows every decoded
- * property with per-value copy actions and a Copy-as-JSON button.
+ * property with per-value copy actions and a Copy-as-JSON button.  Calling and
+ * target process metadata is resolved lazily when the selection changes.
  */
 
 #include <Windows.h>
@@ -26,6 +27,7 @@
 
 #include "EventBuffer.h"
 #include "EtwConsumer.h"
+#include "ProcessInfo.h"
 
 /* -------------------------------------------------------------------------
  * Keyword table entry
@@ -61,6 +63,8 @@ private:
     void RenderKeywordsContent();   /* renders inside the already-begun child */
     void RenderEventTable();        /* renders inside the already-begun child */
     void RenderEventDetails();      /* renders inside the already-begun child */
+    void RenderProcessContext();    /* process enrichment for the selection */
+    void RefreshProcessContext();   /* one lookup per selected event */
 
     /* ---- Session helpers ---- */
     void DoStart();
@@ -70,7 +74,7 @@ private:
     static RowColor  ClassifyEvent(const TiEvent& ev);
     static std::string FormatTimestamp(const FILETIME& ft);
     static std::string FormatTimestampFull(const FILETIME& ft);
-    static std::string BuildEventJson(const TiEvent& ev);
+    std::string BuildEventJson(const TiEvent& ev) const;
 
     /* ---- File logging ---- */
     void LogEventToFile(const TiEvent& ev);
@@ -104,6 +108,13 @@ private:
     TiEvent             m_selected;
     uint64_t            m_selectedSeq     = 0;
     float               m_detailWidth     = 360.0f;
+
+    /* Process enrichment (resolved only when the selected event changes) */
+    uint64_t            m_contextSeq      = ~0ull;
+    uint32_t            m_contextCallingPid = 0;
+    uint32_t            m_contextTargetPid  = 0;
+    ProcessInfo         m_callingInfo;
+    ProcessInfo         m_targetInfo;
 
     /* File log */
     std::ofstream       m_logFile;

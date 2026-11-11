@@ -72,6 +72,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="ImGuiApp.cpp" />
     <ClCompile Include="EtwConsumer.cpp" />
+    <ClCompile Include="ProcessInfo.cpp" />
     <ClCompile Include="SecurityTrace.cpp" />
     <ClCompile Include="Headless.cpp" />
     <ClCompile Include="..\third_party\imgui\imgui.cpp" />
@@ -85,6 +86,7 @@
   <ItemGroup>
     <ClInclude Include="EventBuffer.h" />
     <ClInclude Include="EtwConsumer.h" />
+    <ClInclude Include="ProcessInfo.h" />
     <ClInclude Include="SecurityTrace.h" />
     <ClInclude Include="Headless.h" />
     <ClInclude Include="ImGuiApp.h" />

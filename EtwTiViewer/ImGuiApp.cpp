@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 /* JSON string escaping (used by the event log and Copy-as-JSON). */
 static std::string EscapeJson(const std::string& s) {
@@ -619,6 +620,96 @@ void ImGuiApp::RenderEventTable() {
 }
 
 /* =========================================================================
+ * Process metadata helpers
+ * ========================================================================= */
+
+static const std::string* FindEventField(const TiEvent& ev, const char* name) {
+    for (const auto& field : ev.fields) {
+        if (field.first == name)
+            return &field.second;
+    }
+    return nullptr;
+}
+
+static uint32_t ParsePidField(const TiEvent& ev, const char* name,
+                              uint32_t fallback) {
+    const std::string* value = FindEventField(ev, name);
+    if (!value)
+        return fallback;
+
+    char* end = nullptr;
+    const unsigned long pid = strtoul(value->c_str(), &end, 10);
+    if (end == value->c_str())
+        return fallback;
+    return static_cast<uint32_t>(pid);
+}
+
+static std::string BuildProcessSummary(const ProcessInfo& info) {
+    std::ostringstream out;
+    out << "PID: " << info.pid << "\n";
+
+    if (!info.imageName.empty())
+        out << "Image: " << info.imageName << "\n";
+    if (!info.imagePath.empty())
+        out << "Path: " << info.imagePath << "\n";
+    if (!info.commandLine.empty())
+        out << "Command line: " << info.commandLine << "\n";
+
+    if (info.hasParent) {
+        out << "Parent: PID " << info.parentPid;
+        if (!info.parentName.empty())
+            out << " (" << info.parentName << ")";
+        out << "\n";
+        if (!info.parentPath.empty())
+            out << "Parent path: " << info.parentPath << "\n";
+    }
+
+    if (!info.user.empty())
+        out << "User: " << info.user << "\n";
+    if (!info.integrity.empty()) {
+        out << "Integrity: " << info.integrity;
+        if (info.elevated)
+            out << " (elevated)";
+        out << "\n";
+    }
+
+    if (!info.error.empty())
+        out << "Note: " << info.error << "\n";
+
+    return out.str();
+}
+
+/* Label/value row with wrapped text and a right-click copy menu. */
+static void RenderProcessField(const char* label, const std::string& value) {
+    if (value.empty())
+        return;
+
+    ImGui::PushID(label);
+
+    const float valueIndent = ImGui::GetCursorPosX() + 92.0f;
+
+    ImGui::TextDisabled("%s", label);
+    ImGui::SameLine(valueIndent);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(value.c_str());
+    ImGui::PopTextWrapPos();
+
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Right-click to copy this value.");
+    if (ImGui::IsItemHovered() &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+        ImGui::OpenPopup("##proc_value_menu");
+    }
+    if (ImGui::BeginPopup("##proc_value_menu")) {
+        if (ImGui::MenuItem("Copy value"))
+            ImGui::SetClipboardText(value.c_str());
+        ImGui::EndPopup();
+    }
+
+    ImGui::PopID();
+}
+
+/* =========================================================================
  * Event details — rendered inside the ##details child
  * ========================================================================= */
 
@@ -639,6 +730,7 @@ void ImGuiApp::RenderEventDetails() {
 
     const TiEvent& ev = m_selected;
     const ImGuiStyle& style = ImGui::GetStyle();
+    const bool newSelection = (m_contextSeq != ev.seq);
 
     /* Event name */
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.86f, 1.00f, 1.0f));
@@ -661,23 +753,36 @@ void ImGuiApp::RenderEventDetails() {
     ImGui::Text("0x%016llX", (unsigned long long)ev.keyword);
 
     ImGui::Spacing();
-    if (ImGui::Button("Copy event as JSON", {-1.0f, 0.0f}))
+    if (ImGui::Button("Copy event as JSON", {-1.0f, 0.0f})) {
+        if (m_contextSeq != ev.seq)
+            RefreshProcessContext();
         ImGui::SetClipboardText(BuildEventJson(ev).c_str());
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGui::SetTooltip("Copy the event metadata and all properties as JSON.");
+        ImGui::SetTooltip("Copy the event metadata, properties, and resolved "
+                          "process context as JSON.");
 
     ImGui::Spacing();
     ImGui::Separator();
 
+    /* Metadata and the copy button stay pinned; process context and all
+     * properties share one scroll region. */
+    ImGui::BeginChild("##details_body", {0.0f, 0.0f}, false);
+    if (newSelection)
+        ImGui::SetScrollY(0.0f);
+
+    RenderProcessContext();
+
+    ImGui::Spacing();
     ImGui::TextDisabled("Properties (%zu)", ev.fields.size());
     if (ev.fields.empty()) {
         ImGui::Spacing();
         ImGui::TextDisabled("The provider did not expose any properties for this event.");
+        ImGui::EndChild();
         return;
     }
 
-    /* Scrollable property list. Values wrap; the Copy button is on the key line. */
-    ImGui::BeginChild("##properties", {0.0f, 0.0f}, false);
+    /* Values wrap; the Copy button is on the key line. */
     for (size_t i = 0; i < ev.fields.size(); ++i) {
         ImGui::PushID(static_cast<int>(i));
 
@@ -730,7 +835,123 @@ void ImGuiApp::RenderEventDetails() {
 
         ImGui::PopID();
     }
+
     ImGui::EndChild();
+}
+
+/* =========================================================================
+ * Process context — lazy lookup for the currently selected event
+ * ========================================================================= */
+
+void ImGuiApp::RefreshProcessContext() {
+    m_contextSeq = m_selected.seq;
+
+    m_contextCallingPid = ParsePidField(m_selected, "CallingProcessId",
+                                        m_selected.pid);
+    m_contextTargetPid  = ParsePidField(m_selected, "TargetProcessId", 0);
+
+    m_callingInfo = QueryProcessInfo(m_contextCallingPid, true);
+
+    if (m_contextTargetPid != 0 &&
+        m_contextTargetPid != m_contextCallingPid) {
+        m_targetInfo = QueryProcessInfo(m_contextTargetPid, true);
+    } else {
+        m_targetInfo = ProcessInfo{};
+    }
+}
+
+void ImGuiApp::RenderProcessContext() {
+    if (!m_hasSelection)
+        return;
+
+    if (m_contextSeq != m_selected.seq)
+        RefreshProcessContext();
+
+    if (!ImGui::CollapsingHeader("Process Context",
+            ImGuiTreeNodeFlags_DefaultOpen)) {
+        return;
+    }
+
+    auto RenderBlock = [](const char* heading, DWORD pid,
+                          const ProcessInfo& info) {
+        ImGui::PushID(static_cast<int>(pid));
+
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float startX = ImGui::GetCursorPosX();
+        const float width  = ImGui::GetContentRegionAvail().x;
+        const float copyW  = ImGui::CalcTextSize("Copy").x +
+                             style.FramePadding.x * 2.0f;
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.86f, 1.00f, 1.0f));
+        ImGui::Text("%s  (PID %u)", heading, (unsigned)pid);
+        ImGui::PopStyleColor();
+
+        if (startX + width - copyW >
+            ImGui::GetCursorPosX() + style.ItemSpacing.x) {
+            ImGui::SameLine(startX + width - copyW);
+        } else {
+            ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("Copy"))
+            ImGui::SetClipboardText(BuildProcessSummary(info).c_str());
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Copy this process summary to the clipboard.");
+
+        if (!info.found) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", info.error.empty()
+                ? "Process details unavailable."
+                : info.error.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::Spacing();
+            ImGui::PopID();
+            return;
+        }
+
+        if (!info.imageName.empty())
+            RenderProcessField("Image", info.imageName);
+        if (!info.imagePath.empty())
+            RenderProcessField("Path", info.imagePath);
+        if (!info.commandLine.empty())
+            RenderProcessField("Command line", info.commandLine);
+
+        if (info.hasParent) {
+            std::string parent = "PID " + std::to_string(info.parentPid);
+            if (!info.parentName.empty())
+                parent += " (" + info.parentName + ")";
+            RenderProcessField("Parent", parent);
+            if (!info.parentPath.empty())
+                RenderProcessField("Parent path", info.parentPath);
+        }
+
+        if (!info.user.empty())
+            RenderProcessField("User", info.user);
+        if (!info.integrity.empty()) {
+            std::string integrity = info.integrity;
+            if (info.elevated)
+                integrity += " (elevated)";
+            RenderProcessField("Integrity", integrity);
+        }
+
+        if (!info.error.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", info.error.c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Spacing();
+        ImGui::PopID();
+    };
+
+    RenderBlock("CALLING PROCESS", m_contextCallingPid, m_callingInfo);
+
+    if (m_contextTargetPid != 0 &&
+        m_contextTargetPid != m_contextCallingPid) {
+        ImGui::Separator();
+        RenderBlock("TARGET PROCESS", m_contextTargetPid, m_targetInfo);
+    }
+
+    ImGui::Separator();
 }
 
 /* =========================================================================
@@ -802,7 +1023,31 @@ std::string ImGuiApp::FormatTimestampFull(const FILETIME& ft) {
     return buf;
 }
 
-std::string ImGuiApp::BuildEventJson(const TiEvent& ev) {
+static std::string BuildProcessJson(const ProcessInfo& info) {
+    std::ostringstream out;
+    out << "{\"pid\":" << info.pid
+        << ",\"found\":" << (info.found ? "true" : "false")
+        << ",\"error\":\"" << EscapeJson(info.error) << "\""
+        << ",\"image\":\"" << EscapeJson(info.imageName) << "\""
+        << ",\"path\":\"" << EscapeJson(info.imagePath) << "\""
+        << ",\"commandLine\":\"" << EscapeJson(info.commandLine) << "\""
+        << ",\"parent\":";
+    if (info.hasParent) {
+        out << "{\"pid\":" << info.parentPid
+            << ",\"found\":" << (info.parentFound ? "true" : "false")
+            << ",\"image\":\"" << EscapeJson(info.parentName) << "\""
+            << ",\"path\":\"" << EscapeJson(info.parentPath) << "\"}";
+    } else {
+        out << "null";
+    }
+    out << ",\"user\":\"" << EscapeJson(info.user) << "\""
+        << ",\"integrity\":\"" << EscapeJson(info.integrity) << "\""
+        << ",\"elevated\":" << (info.elevated ? "true" : "false")
+        << "}";
+    return out.str();
+}
+
+std::string ImGuiApp::BuildEventJson(const TiEvent& ev) const {
     char keyword[24];
     snprintf(keyword, sizeof(keyword), "0x%016llX",
              (unsigned long long)ev.keyword);
@@ -821,6 +1066,20 @@ std::string ImGuiApp::BuildEventJson(const TiEvent& ev) {
         out << "\"" << EscapeJson(ev.fields[i].first)
             << "\":\"" << EscapeJson(ev.fields[i].second) << "\"";
     }
+
+    out << "},\"processes\":{\"calling\":"
+        << BuildProcessJson(m_callingInfo);
+
+    if (m_contextTargetPid != 0) {
+        const ProcessInfo& target =
+            (m_contextTargetPid == m_contextCallingPid)
+                ? m_callingInfo
+                : m_targetInfo;
+        out << ",\"target\":" << BuildProcessJson(target);
+    } else {
+        out << ",\"target\":null";
+    }
+
     out << "}}";
     return out.str();
 }
