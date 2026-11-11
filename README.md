@@ -179,7 +179,7 @@ EtwTiSuite/
 |---|---|
 | Windows 10 21H2+ / Windows 11 x64 | Run in a VM |
 | Visual Studio 2022 (v143) or 2026 (v145) Build Tools, C++ | `build.ps1` auto-detects the toolset |
-| Administrator account | One-time AutoLogger registration + viewer launch |
+| Administrator account | One-time AutoLogger registration; the viewer self-elevates on launch |
 | One reboot after registration | The kernel creates AutoLogger sessions at boot |
 
 ### Optional (legacy driver path only)
@@ -209,7 +209,7 @@ powershell -ExecutionPolicy Bypass -File .\install_autologger.ps1 -Status
 # 4. End-to-end check: capture + provoke injection activity, assert events
 powershell -ExecutionPolicy Bypass -File .\verify.ps1
 
-# 5. Launch the GUI (elevated) and click Start
+# 5. Launch the GUI and click Start (it self-elevates)
 .\EtwTiViewer\x64\Release\EtwTiViewer.exe
 ```
 
@@ -232,10 +232,23 @@ sc start EtwTiDriver
 path, patch `EPROCESS->Protection` (see WinDbg procedure above) while
 `EtwTiViewer.exe` is running.
 
-**2. Launch the viewer** — `EtwTiViewer\x64\Release\EtwTiViewer.exe` (as Administrator). Status bar indicators:
+**2. Launch the viewer** — `EtwTiViewer\x64\Release\EtwTiViewer.exe`.  The
+viewer asks for elevation itself on startup, so a normal desktop launch is
+enough. Status bar indicators:
 - **Driver (optional)** — green when `\\.\EtwTiDriver` opens; grey = not loaded (ETW-TI still works)
 - **Pipe (optional)** — green when the driver connects to the forwarder pipe
 - **ETW-TI (AutoLogger)** — green when the viewer is attached to the protected session; no patch required
+
+> **Shared folders / network drives.**  The manifest deliberately requests
+> `asInvoker`; elevation happens in `EnsureElevated()` in `main.cpp`.  The UAC
+> elevation broker cannot resolve images on volume-less filesystems such as
+> VirtioFS/WinFsp shares (a QEMU shared folder on `Z:`), and launching a
+> `requireAdministrator` image from one fails with *"The volume does not
+> contain a recognized file system"* before the process starts.  When the
+> broker rejects the image with `ERROR_UNRECOGNIZED_VOLUME`, the viewer copies
+> itself to `%TEMP%\EtwTiViewer\run-<id>\` and elevates that copy instead.
+> UAC still applies unless the account is configured to elevate without
+> prompting.
 
 **3. Capture:**
 1. Check keywords in the **Keywords** panel (or **Select All**)

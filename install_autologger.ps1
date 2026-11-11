@@ -237,7 +237,7 @@ Write-Host 'Installed.  The session is created by the kernel at boot.' -Foregrou
 Write-Host ''
 Write-Host 'NEXT:' -ForegroundColor Yellow
 Write-Host '  1. reboot'
-Write-Host '  2. run the viewer (elevated):'
+Write-Host '  2. run the viewer (it self-elevates):'
 Write-Host '       EtwTiViewer\EtwTiViewer\x64\Release\EtwTiViewer.exe'
 Write-Host '     or verify headlessly:'
 Write-Host '       powershell -ExecutionPolicy Bypass -File .\verify.ps1'

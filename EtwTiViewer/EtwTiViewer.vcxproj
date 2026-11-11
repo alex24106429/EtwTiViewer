@@ -42,7 +42,10 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;tdh.lib;advapi32.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <!-- The custom manifest supplies trustInfo (asInvoker); elevation is
+           done at runtime in main.cpp.  Suppress the linker-generated UAC
+           fragment so the two manifests do not conflict. -->
+      <EnableUAC>false</EnableUAC>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -62,7 +65,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;tdh.lib;advapi32.lib;ole32.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
+      <EnableUAC>false</EnableUAC>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -94,6 +97,9 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="EtwTiViewer.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="EtwTiViewer.manifest" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

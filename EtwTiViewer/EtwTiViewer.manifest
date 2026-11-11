@@ -6,10 +6,17 @@
     name="EtwTiViewer"
     type="win32"/>
   <description>ETW Threat Intelligence Viewer</description>
+  <!--
+    asInvoker on purpose: EtwTiViewer elevates itself at runtime (see
+    EnsureElevated() in main.cpp).  A requireAdministrator manifest cannot be
+    started from volumes the UAC broker cannot resolve (VirtioFS/WinFsp
+    shares, some network drives): ShellExecuteEx fails with
+    ERROR_UNRECOGNIZED_VOLUME before the process is created.
+  -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
       </requestedPrivileges>
     </security>
   </trustInfo>
