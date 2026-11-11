@@ -4,12 +4,15 @@
  *
  * Layout (no docking, no floating panels):
  *
- *   ┌──────────────────────────────────────────────┐
- *   │  TOOLBAR  (two rows, ~80px)                  │
- *   ├────────────┬─────────────────────────────────┤
- *   │  KEYWORDS  │  EVENT TABLE                    │
- *   │  260px     │  fills remaining space          │
- *   └────────────┴─────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────────────┐
+ *   │  TOOLBAR  (two rows, ~80px)                                  │
+ *   ├────────────┬───────────────────────────┬─────────────────────┤
+ *   │  KEYWORDS  │  EVENT LIST               │  EVENT DETAILS      │
+ *   │  260px     │  fills remaining space    │  resizable, 360px   │
+ *   └────────────┴───────────────────────────┴─────────────────────┘
+ *
+ * Clicking a row selects it; the right-hand panel shows every decoded
+ * property with per-value copy actions and a Copy-as-JSON button.
  */
 
 #include <Windows.h>
@@ -57,6 +60,7 @@ private:
     void RenderToolbar();
     void RenderKeywordsContent();   /* renders inside the already-begun child */
     void RenderEventTable();        /* renders inside the already-begun child */
+    void RenderEventDetails();      /* renders inside the already-begun child */
 
     /* ---- Session helpers ---- */
     void DoStart();
@@ -65,7 +69,8 @@ private:
     static ULONGLONG BuildKeywordMask(const std::vector<KeywordEntry>& kw);
     static RowColor  ClassifyEvent(const TiEvent& ev);
     static std::string FormatTimestamp(const FILETIME& ft);
-    static std::string FormatFields(const TiEvent& ev, size_t maxChars);
+    static std::string FormatTimestampFull(const FILETIME& ft);
+    static std::string BuildEventJson(const TiEvent& ev);
 
     /* ---- File logging ---- */
     void LogEventToFile(const TiEvent& ev);
@@ -93,6 +98,12 @@ private:
     char                m_logPath[512]    = "etw_ti.jsonl";
     char                m_filter[256]     = {};
     int                 m_maxRows         = 5000;
+
+    /* Event details panel */
+    bool                m_hasSelection    = false;
+    TiEvent             m_selected;
+    uint64_t            m_selectedSeq     = 0;
+    float               m_detailWidth     = 360.0f;
 
     /* File log */
     std::ofstream       m_logFile;

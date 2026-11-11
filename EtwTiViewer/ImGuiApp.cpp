@@ -2,7 +2,7 @@
  * ImGuiApp.cpp — Single-window ImGui UI implementation.
  *
  * Layout: one fullscreen ImGui window (no docking, no floating panels).
- * Toolbar at top, keyword child (260px) + event table child side by side.
+ * Toolbar at top, then keywords (260px) + event list + details panel.
  */
 
 #include "ImGuiApp.h"
@@ -16,6 +16,30 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+
+/* JSON string escaping (used by the event log and Copy-as-JSON). */
+static std::string EscapeJson(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04X", c);
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
 
 /* =========================================================================
  * Keyword table
@@ -198,23 +222,69 @@ void ImGuiApp::Render() {
     RenderToolbar();
     ImGui::Spacing();
 
-    /* ---- Side-by-side children ---- */
-    /* Left: keyword panel (fixed 260 px, full remaining height) */
+    /* ---- Three-column workspace ---- */
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {4.0f, 3.0f});
-    if (ImGui::BeginChild("##keywords", {260.0f, 0.0f}, true,
+
+    const float kwW       = 260.0f;
+    const float gap       = 4.0f;
+    const float splitW    = 5.0f;
+    const float fullW     = ImGui::GetContentRegionAvail().x;
+    const float minEventW = 280.0f;
+
+    /* Keep the details panel usable on narrow windows while preserving a
+     * sensible minimum width for the event list. */
+    const float maxDetailW = (std::max)(240.0f,
+        (std::min)(640.0f, fullW - kwW - gap * 3.0f - splitW - minEventW));
+    const float detailW = std::clamp(m_detailWidth, 240.0f, maxDetailW);
+    const float eventW  = (std::max)(160.0f,
+        fullW - kwW - gap * 3.0f - splitW - detailW);
+
+    /* Left: keyword panel */
+    if (ImGui::BeginChild("##keywords", {kwW, 0.0f}, true,
                           ImGuiWindowFlags_NoScrollbar)) {
         RenderKeywordsContent();
     }
     ImGui::EndChild();
-    ImGui::PopStyleVar();
 
-    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::SameLine(0.0f, gap);
 
-    /* Right: event table (fill remaining width and height) */
-    if (ImGui::BeginChild("##events", {0.0f, 0.0f}, false)) {
+    /* Middle: event list */
+    if (ImGui::BeginChild("##events", {eventW, 0.0f}, false)) {
         RenderEventTable();
     }
     ImGui::EndChild();
+
+    /* Draggable splitter for the details panel */
+    ImGui::SameLine(0.0f, gap);
+    ImGui::InvisibleButton("##details_splitter",
+                           {splitW, ImGui::GetContentRegionAvail().y});
+    const bool splitHot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    if (splitHot)
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    if (ImGui::IsItemActive())
+        m_detailWidth = std::clamp(m_detailWidth - ImGui::GetIO().MouseDelta.x,
+                                   240.0f, 640.0f);
+
+    /* Thin divider line makes the resize handle discoverable. */
+    const ImVec2 splitMin = ImGui::GetItemRectMin();
+    const ImVec2 splitMax = ImGui::GetItemRectMax();
+    ImGui::GetWindowDrawList()->AddLine(
+        {splitMin.x + splitW * 0.5f, splitMin.y},
+        {splitMin.x + splitW * 0.5f, splitMax.y},
+        ImGui::GetColorU32(splitHot ? ImGuiCol_SeparatorActive
+                                    : ImGuiCol_Separator),
+        1.0f);
+
+    ImGui::SameLine(0.0f, gap);
+
+    /* Right: selected event details */
+    if (ImGui::BeginChild("##details", {detailW, 0.0f}, true,
+                          ImGuiWindowFlags_NoScrollbar)) {
+        RenderEventDetails();
+    }
+    ImGui::EndChild();
+
+    ImGui::PopStyleVar();
 
     ImGui::End();
 
@@ -237,7 +307,10 @@ void ImGuiApp::RenderToolbar() {
     }
     ImGui::SameLine();
 
-    if (ImGui::Button("Clear")) m_evBuf.Clear();
+    if (ImGui::Button("Clear")) {
+        m_evBuf.Clear();
+        m_hasSelection = false;
+    }
     ImGui::SameLine(0.0f, 12.0f);
 
     ImGui::TextUnformatted("Filter:");
@@ -457,16 +530,15 @@ void ImGuiApp::RenderEventTable() {
 
     /* Use full available area for the table */
     ImVec2 tableSize = ImGui::GetContentRegionAvail();
-    if (!ImGui::BeginTable("EventTable", 6, kTableFlags, tableSize))
+    if (!ImGui::BeginTable("EventTable", 5, kTableFlags, tableSize))
         return;
 
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableSetupColumn("Timestamp", ImGuiTableColumnFlags_WidthFixed,    90.0f);
     ImGui::TableSetupColumn("ID",        ImGuiTableColumnFlags_WidthFixed,    38.0f);
-    ImGui::TableSetupColumn("Name",      ImGuiTableColumnFlags_WidthStretch,  0.25f);
+    ImGui::TableSetupColumn("Name",      ImGuiTableColumnFlags_WidthStretch,  1.00f);
     ImGui::TableSetupColumn("PID",       ImGuiTableColumnFlags_WidthFixed,    52.0f);
     ImGui::TableSetupColumn("TID",       ImGuiTableColumnFlags_WidthFixed,    52.0f);
-    ImGui::TableSetupColumn("Fields",    ImGuiTableColumnFlags_WidthStretch,  0.75f);
     ImGui::TableHeadersRow();
 
     std::vector<TiEvent> snap = m_evBuf.Snapshot(static_cast<size_t>(m_maxRows));
@@ -488,6 +560,7 @@ void ImGuiApp::RenderEventTable() {
     static const ImVec4 kColRemote     {0.80f, 0.20f, 0.20f, 0.35f};
     static const ImVec4 kColRemoteKern {0.80f, 0.47f, 0.00f, 0.35f};
     static const ImVec4 kColSuspect    {0.67f, 0.67f, 0.00f, 0.30f};
+    static const ImVec4 kColSelected   {0.18f, 0.42f, 0.66f, 1.00f};
 
     for (const auto& ev : snap) {
         ImGui::TableNextRow();
@@ -501,8 +574,30 @@ void ImGuiApp::RenderEventTable() {
                                    ImGui::ColorConvertFloat4ToU32(bg));
         }
 
+        const bool selected = m_hasSelection && ev.seq == m_selectedSeq;
+
         ImGui::TableSetColumnIndex(0);
-        ImGui::TextUnformatted(FormatTimestamp(ev.timestamp).c_str());
+        const std::string ts = FormatTimestamp(ev.timestamp);
+
+        /* Timestamps repeat at millisecond resolution, so include the
+         * monotonically increasing sequence number in the Selectable ID. */
+        char rowLabel[64];
+        snprintf(rowLabel, sizeof(rowLabel), "%s##%llu",
+                 ts.c_str(), (unsigned long long)ev.seq);
+
+        if (selected)
+            ImGui::PushStyleColor(ImGuiCol_Header, kColSelected);
+        if (ImGui::Selectable(rowLabel, selected,
+                              ImGuiSelectableFlags_SpanAllColumns)) {
+            m_selected     = ev;
+            m_selectedSeq  = ev.seq;
+            m_hasSelection = true;
+        }
+        if (selected)
+            ImGui::PopStyleColor();
+
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Click to show all properties in the details panel.");
 
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%u", (unsigned)ev.eventId);
@@ -515,15 +610,127 @@ void ImGuiApp::RenderEventTable() {
 
         ImGui::TableSetColumnIndex(4);
         ImGui::Text("%u", ev.tid);
-
-        ImGui::TableSetColumnIndex(5);
-        ImGui::TextUnformatted(FormatFields(ev, 140).c_str());
     }
 
     if (m_autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f)
         ImGui::SetScrollHereY(1.0f);
 
     ImGui::EndTable();
+}
+
+/* =========================================================================
+ * Event details — rendered inside the ##details child
+ * ========================================================================= */
+
+void ImGuiApp::RenderEventDetails() {
+    ImGui::TextDisabled("EVENT DETAILS");
+    ImGui::Separator();
+
+    if (!m_hasSelection) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("No event selected");
+        ImGui::Spacing();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("Click a row in the event list to inspect all of its "
+                            "properties.");
+        ImGui::PopTextWrapPos();
+        return;
+    }
+
+    const TiEvent& ev = m_selected;
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    /* Event name */
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.86f, 1.00f, 1.0f));
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(ev.name.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+
+    /* Event metadata */
+    const float metaIndent = ImGui::GetCursorPosX() + 92.0f;
+    const std::string tsFull = FormatTimestampFull(ev.timestamp);
+
+    ImGui::TextDisabled("Timestamp"); ImGui::SameLine(metaIndent);
+    ImGui::TextUnformatted(tsFull.c_str());
+    ImGui::TextDisabled("Event ID"); ImGui::SameLine(metaIndent);
+    ImGui::Text("%u  (task %u)", (unsigned)ev.eventId, (unsigned)ev.task);
+    ImGui::TextDisabled("PID / TID"); ImGui::SameLine(metaIndent);
+    ImGui::Text("%u / %u", ev.pid, ev.tid);
+    ImGui::TextDisabled("Keyword"); ImGui::SameLine(metaIndent);
+    ImGui::Text("0x%016llX", (unsigned long long)ev.keyword);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Copy event as JSON", {-1.0f, 0.0f}))
+        ImGui::SetClipboardText(BuildEventJson(ev).c_str());
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        ImGui::SetTooltip("Copy the event metadata and all properties as JSON.");
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    ImGui::TextDisabled("Properties (%zu)", ev.fields.size());
+    if (ev.fields.empty()) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("The provider did not expose any properties for this event.");
+        return;
+    }
+
+    /* Scrollable property list. Values wrap; the Copy button is on the key line. */
+    ImGui::BeginChild("##properties", {0.0f, 0.0f}, false);
+    for (size_t i = 0; i < ev.fields.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+
+        const std::string& key   = ev.fields[i].first;
+        const std::string& value = ev.fields[i].second;
+
+        const float rowStartX = ImGui::GetCursorPosX();
+        const float rowWidth  = ImGui::GetContentRegionAvail().x;
+        const float copyW     = ImGui::CalcTextSize("Copy").x +
+                                style.FramePadding.x * 2.0f;
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.56f, 0.76f, 0.96f, 1.0f));
+        ImGui::TextUnformatted(key.c_str());
+        ImGui::PopStyleColor();
+
+        /* Right-align the copy button on the property-name line. */
+        if (rowStartX + rowWidth - copyW >
+            ImGui::GetCursorPosX() + style.ItemSpacing.x) {
+            ImGui::SameLine(rowStartX + rowWidth - copyW);
+        } else {
+            ImGui::SameLine();
+        }
+        if (ImGui::SmallButton("Copy"))
+            ImGui::SetClipboardText(value.c_str());
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("Copy this value to the clipboard.");
+
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextUnformatted(value.c_str());
+        ImGui::PopTextWrapPos();
+
+        if (ImGui::IsItemHovered() &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            ImGui::OpenPopup("##value_menu");
+        }
+        if (ImGui::BeginPopup("##value_menu")) {
+            if (ImGui::MenuItem("Copy value"))
+                ImGui::SetClipboardText(value.c_str());
+            if (ImGui::MenuItem("Copy name=value")) {
+                const std::string kv = key + "=" + value;
+                ImGui::SetClipboardText(kv.c_str());
+            }
+            ImGui::EndPopup();
+        }
+
+        if (i + 1 < ev.fields.size())
+            ImGui::Separator();
+        else
+            ImGui::Spacing();
+
+        ImGui::PopID();
+    }
+    ImGui::EndChild();
 }
 
 /* =========================================================================
@@ -585,18 +792,37 @@ std::string ImGuiApp::FormatTimestamp(const FILETIME& ft) {
     return buf;
 }
 
-std::string ImGuiApp::FormatFields(const TiEvent& ev, size_t maxChars) {
-    std::string out;
+std::string ImGuiApp::FormatTimestampFull(const FILETIME& ft) {
+    SYSTEMTIME st;
+    FileTimeToSystemTime(&ft, &st);
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%04u-%02u-%02u %02u:%02u:%02u.%03u UTC",
+             st.wYear, st.wMonth, st.wDay,
+             st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+    return buf;
+}
+
+std::string ImGuiApp::BuildEventJson(const TiEvent& ev) {
+    char keyword[24];
+    snprintf(keyword, sizeof(keyword), "0x%016llX",
+             (unsigned long long)ev.keyword);
+
+    std::ostringstream out;
+    out << "{\"ts\":\"" << FormatTimestampFull(ev.timestamp) << "\""
+        << ",\"id\":"   << ev.eventId
+        << ",\"task\":" << ev.task
+        << ",\"name\":\"" << EscapeJson(ev.name) << "\""
+        << ",\"pid\":"  << ev.pid
+        << ",\"tid\":"  << ev.tid
+        << ",\"keyword\":\"" << keyword << "\""
+        << ",\"fields\":{";
     for (size_t i = 0; i < ev.fields.size(); ++i) {
-        if (i > 0) out += ", ";
-        out += ev.fields[i].first + "=" + ev.fields[i].second;
-        if (out.size() >= maxChars) {
-            out.resize(maxChars);
-            out += "...";
-            break;
-        }
+        if (i > 0) out << ",";
+        out << "\"" << EscapeJson(ev.fields[i].first)
+            << "\":\"" << EscapeJson(ev.fields[i].second) << "\"";
     }
-    return out;
+    out << "}}";
+    return out.str();
 }
 
 /* =========================================================================
@@ -606,27 +832,17 @@ std::string ImGuiApp::FormatFields(const TiEvent& ev, size_t maxChars) {
 void ImGuiApp::LogEventToFile(const TiEvent& ev) {
     if (!m_logFile.is_open()) return;
 
-    auto escape = [](const std::string& s) {
-        std::string r;
-        for (char c : s) {
-            if      (c == '"')  r += "\\\"";
-            else if (c == '\\') r += "\\\\";
-            else                r += c;
-        }
-        return r;
-    };
-
     std::string ts = FormatTimestamp(ev.timestamp);
     m_logFile << "{\"ts\":\"" << ts << "\""
               << ",\"id\":"   << ev.eventId
-              << ",\"name\":\"" << escape(ev.name) << "\""
+              << ",\"name\":\"" << EscapeJson(ev.name) << "\""
               << ",\"pid\":"  << ev.pid
               << ",\"tid\":"  << ev.tid
               << ",\"fields\":{";
     for (size_t i = 0; i < ev.fields.size(); ++i) {
         if (i > 0) m_logFile << ",";
-        m_logFile << "\"" << escape(ev.fields[i].first)
-                  << "\":\"" << escape(ev.fields[i].second) << "\"";
+        m_logFile << "\"" << EscapeJson(ev.fields[i].first)
+                  << "\":\"" << EscapeJson(ev.fields[i].second) << "\"";
     }
     m_logFile << "}}\n";
 }

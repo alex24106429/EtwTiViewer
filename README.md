@@ -109,7 +109,7 @@ The AutoLogger registry key lives under
 EtwTiSuite/
 ├── EtwTiViewer/
 │   ├── main.cpp             WinMain, runtime elevation, D3D11 + ImGui loop
-│   ├── ImGuiApp.h/.cpp      UI: keyword panel, toolbar, event table, logging
+│   ├── ImGuiApp.h/.cpp      UI: keyword panel, toolbar, event list, details panel, logging
 │   ├── EtwConsumer.h/.cpp   Real-time ETW-TI consumer
 │   ├── SecurityTrace.h/.cpp AutoLogger discovery + ControlTraceW detour
 │   ├── Headless.h/.cpp      CLI capture mode for automation/CI
@@ -179,11 +179,15 @@ is attached to the protected session.
 **2. Capture:**
 1. Check keywords in the **Keywords** panel (or **Select All**)
 2. Click **Start** — the viewer attaches to the AutoLogger session
-3. Events stream into the **Events** table in real time
-4. Use **Filter** to substring-match on name or any field value
-5. Toggle **Log [ON]** to stream to a JSONL file
-6. Hover the status indicator for a detailed tooltip
-7. Click **Stop** → **Clear** to reset
+3. Events stream into the event list in real time
+4. Click an event row to inspect every decoded property in the **details
+   panel** on the right. Each value has a **Copy** button and a right-click
+   copy menu; **Copy event as JSON** copies the whole event. Drag the divider
+   to resize the panel.
+5. Use **Filter** to substring-match on name or any field value
+6. Toggle **Log [ON]** to stream to a JSONL file
+7. Hover the status indicator for a detailed tooltip
+8. Click **Stop** → **Clear** to reset
 
 Keywords selected in the UI are a **client-side filter**: the kernel-side
 provider mask was fixed when the AutoLogger was created at boot.  Changing the

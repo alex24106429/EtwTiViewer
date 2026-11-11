@@ -24,6 +24,7 @@ struct TiEvent {
     uint64_t    keyword;  /* EVENT_DESCRIPTOR.Keyword bitmask — LOCAL/REMOTE/KERNEL_CALLER variant   */
     uint32_t    pid;
     uint32_t    tid;
+    uint64_t    seq = 0;  /* monotonic id assigned by EventBuffer::Push (UI selection) */
     std::string name;
     /* Parsed key=value pairs from the fields blob */
     std::vector<std::pair<std::string, std::string>> fields;
@@ -32,12 +33,14 @@ struct TiEvent {
 class EventBuffer {
 public:
     explicit EventBuffer(size_t capacity)
-        : m_capacity(capacity), m_buf(capacity), m_head(0), m_tail(0), m_size(0)
+        : m_capacity(capacity), m_buf(capacity), m_head(0), m_tail(0), m_size(0),
+          m_nextSeq(0)
     {}
 
     /* Push a new event; drops oldest if full */
     void Push(TiEvent&& ev) {
         std::lock_guard<std::mutex> lk(m_mutex);
+        ev.seq = m_nextSeq++;
         m_buf[m_head] = std::move(ev);
         m_head = (m_head + 1) % m_capacity;
         if (m_size < m_capacity) {
@@ -84,5 +87,6 @@ private:
     size_t                  m_head;     /* next write position */
     size_t                  m_tail;     /* oldest entry position */
     size_t                  m_size;
+    uint64_t                m_nextSeq;  /* never reset, keeps selection ids unique */
     mutable std::mutex      m_mutex;
 };
