@@ -107,6 +107,23 @@ static bool NameMatchesGroup(const char* name, const KwGroup& g) {
     return false;
 }
 
+/*
+ * Keywords that generate a lot of low-value noise and are therefore unticked
+ * by default.  They can still be enabled manually in the sidebar or via [All].
+ */
+static bool KeywordDefaultChecked(const char* name) {
+    static const char* kOffByDefault[] = {
+        "ALLOCVM_LOCAL",
+        "PROTECTVM_LOCAL",
+        "WRITEVM_LOCAL",
+        nullptr,
+    };
+    for (int i = 0; kOffByDefault[i]; ++i)
+        if (strcmp(name, kOffByDefault[i]) == 0)
+            return false;
+    return true;
+}
+
 /* =========================================================================
  * Constructor / destructor
  * ========================================================================= */
@@ -116,7 +133,7 @@ ImGuiApp::ImGuiApp()
     , m_lastFlush(std::chrono::steady_clock::now())
 {
     for (auto& k : kKeywords)
-        m_keywords.push_back({ k.mask, k.name, true });
+        m_keywords.push_back({ k.mask, k.name, KeywordDefaultChecked(k.name) });
 }
 
 ImGuiApp::~ImGuiApp() {
