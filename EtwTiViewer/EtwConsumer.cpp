@@ -43,6 +43,10 @@ static const char* TaskToString(USHORT task)
         case 8:  return "SUSPENDRESUME_THREAD";
         case 9:  return "SUSPENDRESUME_PROCESS";
         case 10: return "DRIVER_DEVICE";
+        case 11: return "PROCESS_IMPERSONATION_UP";
+        case 12: return "PROCESS_IMPERSONATION_REVERT";
+        case 13: return "PROCESS_SYSCALL_USAGE";
+        case 14: return "PROCESS_IMPERSONATION_DOWN";
         default: return "UNKNOWN";
     }
 }
