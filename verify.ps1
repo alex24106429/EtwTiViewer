@@ -75,9 +75,16 @@ Remove-Item $log, $err -ErrorAction SilentlyContinue
 # ---------------------------------------------------------------------------
 # Show session readiness first (this also validates the registry key).
 # ---------------------------------------------------------------------------
-& (Join-Path $root 'install_autologger.ps1') -Status -SessionName $SessionName
+$statusOutput = @(& (Join-Path $root 'install_autologger.ps1') -Status -SessionName $SessionName 2>&1)
+$statusOutput | ForEach-Object { Write-Host $_ }
 if ($LASTEXITCODE -ne 0) {
-    throw 'AutoLogger session is not registered. Run install_autologger.ps1 and reboot.'
+    Write-Host 'AutoLogger session is not registered. Run install_autologger.ps1 and reboot.' -ForegroundColor Red
+    exit 1
+}
+if (($statusOutput | Out-String) -match 'enable FAILED|TI provider.*Status=[1-9][0-9]*') {
+    Write-Host ('The kernel did not enable Microsoft-Windows-Threat-Intelligence (provider Status != 0). ' +
+                'No ETW-TI events are being produced. Re-run install_autologger.ps1 (without -Status) and reboot.') -ForegroundColor Red
+    exit 1
 }
 
 # ---------------------------------------------------------------------------

@@ -75,9 +75,22 @@ $autoLoggerRoot = 'SYSTEM\CurrentControlSet\Control\WMI\Autologger'
 $sessionKey     = "HKLM:\$autoLoggerRoot\$SessionName"
 $providerKey    = Join-Path $sessionKey '{f4e1897c-bb5d-5668-f1d8-040f4d8dd344}'
 
-# MatchAnyKeyword for the AutoLogger provider subkey.  Stored as REG_BINARY(8):
-# 0x000005ffffffffff, i.e. every Threat-Intelligence keyword bit.
-$matchAnyKeyword = [byte[]](0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x05, 0x00, 0x00)
+# MatchAnyKeyword for the AutoLogger provider subkey.
+#
+# It MUST be stored as REG_QWORD.  The AutoLogger parser rejects a REG_BINARY
+# value with ERROR_INVALID_PARAMETER, which the kernel records as
+#     ...\<provider>\Status = 87
+# at boot and leaves the session running without the Threat-Intelligence
+# provider - i.e. the viewer attaches successfully but receives no events.
+# This was verified empirically on Windows 10 21H2:
+#     REG_BINARY 0x00000000FFFFFFFF -> Status=87, session not protected
+#     REG_QWORD  0x00000000FFFFFFFF -> Status=0,  session protected, events flow
+#
+# 0x00000000FFFFFFFF enables bits 0..31 (ALLOCVM_LOCAL .. DEVICE_EVENTS).
+# On newer builds this still enables every classic keyword; add higher bits
+# only after confirming they appear in:
+#   logman query providers "{F4E1897C-BB5D-5668-F1D8-040F4D8DD344}"
+$matchAnyKeyword = [UInt64]4294967295   # 0x00000000FFFFFFFF
 
 function Invoke-ControlTraceQuery([string] $name) {
     if (-not ([System.Management.Automation.PSTypeName]'EtwProbe').Type) {
@@ -142,21 +155,32 @@ if ($Status) {
     'MaximumBuffers', 'MinimumBuffers', 'GUID' | ForEach-Object {
         $v = $values.$_
         if ($_ -eq 'LogFileMode' -and $null -ne $v) {
-            $v = ('0x{0:X} ({1})' -f $v, $(if ($v -band 0x100) { 'real-time' } else { 'not real-time' }))
+            $modes = @()
+            if ($v -band 0x100) { $modes += 'real-time' }
+            if ($v -band 0x80)  { $modes += 'secure' }
+            $v = ('0x{0:X} ({1})' -f $v, $(if ($modes.Count) { $modes -join ', ' } else { 'none' }))
         }
         Write-Host ("  {0,-15}: {1}" -f $_, $v)
     }
 
+    $providerStatus = 0
     if (Test-Path $providerKey) {
         $provider = Get-ItemProperty -Path $providerKey
         $keyword  = $provider.MatchAnyKeyword
         if ($keyword -is [byte[]]) {
             $keyword = [BitConverter]::ToUInt64($keyword, 0)
+        } elseif ($keyword -is [int64] -and $keyword -lt 0) {
+            $keyword = [BitConverter]::ToUInt64([BitConverter]::GetBytes([int64]$keyword), 0)
         } else {
             $keyword = [Convert]::ToUInt64($keyword)
         }
-        Write-Host ("  TI provider    : Enabled={0} Level={1} MatchAnyKeyword=0x{2:X}" -f `
-            $provider.Enabled, $provider.EnableLevel, $keyword)
+        $providerStatus = [int]$provider.Status
+        Write-Host ("  TI provider    : Enabled={0} Level={1} MatchAnyKeyword=0x{2:X} Status={3}" -f `
+            $provider.Enabled, $provider.EnableLevel, $keyword, $providerStatus)
+        if ($providerStatus -ne 0) {
+            Write-Host ('                   enable FAILED at the last boot (error 0x{0:X});' -f $providerStatus) -ForegroundColor Yellow
+            Write-Host '                   no ETW-TI events are being produced. Re-run this script (without -Status) and reboot.' -ForegroundColor Yellow
+        }
     } else {
         Write-Host '  TI provider    : MISSING' -ForegroundColor Red
     }
@@ -167,7 +191,14 @@ if ($Status) {
             Write-Host '  Live session   : PROTECTED (SecurityTrace) - ready to attach' -ForegroundColor Green
         }
         'RUNNING*' {
-            Write-Host "  Live session   : $state" -ForegroundColor Green
+            if ($providerStatus -ne 0) {
+                Write-Host "  Live session   : $state" -ForegroundColor Yellow
+                Write-Host '                   Provider enable failed: the viewer will receive no events.' -ForegroundColor Yellow
+                Write-Host '                   Re-run this script (without -Status) and reboot.' -ForegroundColor Yellow
+            } else {
+                Write-Host "  Live session   : $state" -ForegroundColor Green
+                Write-Host '                   Provider enabled; appending a consumer should work.' -ForegroundColor Gray
+            }
         }
         'NOT_FOUND' {
             Write-Host '  Live session   : NOT RUNNING - reboot after installing the key' -ForegroundColor Yellow
@@ -202,14 +233,17 @@ if (-not (Test-Path $sessionKey)) {
     New-Item -Path $sessionKey -Force | Out-Null
 }
 
-# Session-wide settings.  LogFileMode 0x100 = EVENT_TRACE_REAL_TIME_MODE only.
+# Session-wide settings.  LogFileMode 0x180 = EVENT_TRACE_REAL_TIME_MODE (0x100)
+# | EVENT_TRACE_SECURE_MODE (0x80), matching the DefenderApiLogger AutoLogger.
+# The secure bit is not what enables the provider (that is the QWORD
+# MatchAnyKeyword above), but it matches Microsoft's own TI session.
 $sessionValues = [ordered]@{
     Age            = 1
     BufferSize     = 0x40
     ClockType      = 1
     FlushTimer     = 1
     GUID           = '{7F6E5C2A-1B9D-4E3A-8C61-2F4B8A91D7C8}'
-    LogFileMode    = 0x100
+    LogFileMode    = 0x180
     MaximumBuffers = 0x10
     MinimumBuffers = 0
     Start          = 1
@@ -229,7 +263,7 @@ if (-not (Test-Path $providerKey)) {
 
 New-ItemProperty -Path $providerKey -Name 'Enabled'         -Value 1               -PropertyType DWord  -Force | Out-Null
 New-ItemProperty -Path $providerKey -Name 'EnableLevel'     -Value 4               -PropertyType DWord  -Force | Out-Null
-New-ItemProperty -Path $providerKey -Name 'MatchAnyKeyword' -Value $matchAnyKeyword -PropertyType Binary -Force | Out-Null
+New-ItemProperty -Path $providerKey -Name 'MatchAnyKeyword' -Value $matchAnyKeyword -PropertyType QWord -Force | Out-Null
 New-ItemProperty -Path $providerKey -Name 'Status'          -Value 0               -PropertyType DWord  -Force | Out-Null
 
 Write-Host ''
