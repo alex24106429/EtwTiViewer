@@ -84,6 +84,8 @@ void WriteEventLine(std::ofstream& log, const TiEvent& ev)
         return;
 
     log << "{\"ts\":\"" << FormatTimestamp(ev.timestamp) << "\""
+        << ",\"provider\":\"Microsoft-Windows-Threat-Intelligence\""
+        << ",\"channel\":\"Microsoft-Windows-Threat-Intelligence/Analytic\""
         << ",\"id\":" << ev.eventId
         << ",\"name\":\"" << JsonEscape(ev.name) << "\""
         << ",\"pid\":" << ev.pid
@@ -145,7 +147,9 @@ int RunHeadless(const HeadlessOptions& options)
 
                 WriteEventLine(log, ev);
 
-                if (log.is_open() && (n % 500) == 0)
+                /* Flush every event so external tail-based pipelines see the
+                 * event immediately instead of in 500-event batches. */
+                if (log.is_open())
                     log.flush();
 
                 if (n <= 10)
